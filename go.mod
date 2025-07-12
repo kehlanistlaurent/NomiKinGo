@@ -1,3 +1,3 @@
-module github.com/d3tourrr/NomiKinGo
+module github.com/kehlanistlaurent/NomiKinGo-V2
 
 go 1.18
