@@ -198,9 +198,9 @@ func (nomi *NomiKin) CreateNomiRoom(name *string, note *string, backchannelingEn
 }
 
 func (nomi *NomiKin) SendNomiRoomMessage(message *string, roomId *string) (string, error) {
-    if len(*message) > 599 {
+    if len(*message) > 799 {
         log.Printf("Message too long: %d", len(*message))
-        return fmt.Sprintf("Your message was `%d` characters long, but the maximum message length is 600. Please send a shorter message.", len(*message)), nil
+        return fmt.Sprintf("Your message was `%d` characters long, but the maximum message length is 800. Please send a shorter message.", len(*message)), nil
     }
 
     bodyMap := map[string]string{
