@@ -198,7 +198,7 @@ func (nomi *NomiKin) CreateNomiRoom(name *string, note *string, backchannelingEn
 }
 
 func (nomi *NomiKin) SendNomiRoomMessage(message *string, roomId *string) (string, error) {
-    if len(*message) > 799 {
+    if len(*message) > 800 {
         log.Printf("Message too long: %d", len(*message))
         return fmt.Sprintf("Your message was `%d` characters long, but the maximum message length is 800. Please send a shorter message.", len(*message)), nil
     }
@@ -248,7 +248,7 @@ func (nomi *NomiKin) RequestNomiRoomReply(roomId *string, nomiId *string) (strin
 }
 
 func (nomi *NomiKin) SendNomiMessage (message *string) (string, error) {
-    if len(*message) > 799 {
+    if len(*message) > 800 {
         log.Printf("Message too long: %d", len(*message))
         return fmt.Sprintf("Your message was `%d` characters long, but the maximum message length is 800. Please send a shorter message.", len(*message)), nil
     }
