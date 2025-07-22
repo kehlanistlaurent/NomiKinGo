@@ -1,4 +1,4 @@
-// Nomi.go (MODIFIED)
+// Nomi.go (Patched for RAW JSON Logging)
 package NomiKin
 
 import (
@@ -105,6 +105,9 @@ func (nomi *NomiKin) RequestNomiRoomReply(roomId *string, nomiId *string) (strin
         log.Printf("Error from API call: %v", err.Error())
         return "", err
     }
+
+    // 👇 LOG RAW API RESPONSE
+    log.Printf("🔎 RAW Nomi API response: %s", string(response))
 
     var result NomiReplyMessageContainer
     if err := json.Unmarshal(response, &result); err != nil {
