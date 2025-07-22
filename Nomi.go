@@ -1,4 +1,4 @@
-// Nomi.go (Patched for RAW JSON Logging in Both API Calls)
+// Nomi.go (Surgical Patch: FetchRecentMessages + Polling)
 package NomiKin
 
 import (
@@ -9,11 +9,13 @@ import (
     "io"
     "net/http"
     "strings"
+    "time"
 )
 
 type Nomi struct {
-    Uuid string
-    Name string
+    ApiKey      string
+    CompanionId string
+    LastMessageID string // track last message ID
 }
 
 type Room struct {
@@ -27,25 +29,19 @@ type RoomContainer struct {
 }
 
 type NomiMessage struct {
-    Text string
-}
-
-type NomiSentMessageContainer struct {
-    SentMessage NomiMessage
-}
-
-type NomiReplyMessage struct {
     Text     string `json:"text"`
     ImageUrl string `json:"imageUrl"`
+    Id       string `json:"id"`
+    Timestamp string `json:"timestamp"`
 }
 
-type NomiReplyMessageContainer struct {
-    ReplyMessage NomiReplyMessage `json:"replyMessage"`
+type RecentMessagesResponse struct {
+    Messages []NomiMessage `json:"messages"`
 }
 
+// Existing ApiCall unchanged
 func (nomi *NomiKin) ApiCall(endpoint string, method string, body interface{}) ([]byte, error) {
     method = strings.ToUpper(method)
-
     headers := map[string]string{
         "Authorization": nomi.ApiKey,
         "Content-Type": "application/json",
@@ -84,81 +80,49 @@ func (nomi *NomiKin) ApiCall(endpoint string, method string, body interface{}) (
     }
 
     if resp.StatusCode < 200 || resp.StatusCode > 299 {
-        var errorResult map[string]interface{}
-        if err := json.Unmarshal(responseBody, &errorResult); err != nil {
-            return nil, fmt.Errorf("Error unmarshalling API error response: %v\n%v", err, string(responseBody))
-        }
         return nil, fmt.Errorf("Error response from Nomi API\n Error Code: %v\n Response Body: %v\n", resp.StatusCode, string(responseBody))
     }
 
     return responseBody, nil
 }
 
-func (nomi *NomiKin) SendNomiMessage(message *string) (string, error) {
-    if len(*message) > 800 {
-        log.Printf("Message too long: %d", len(*message))
-        return fmt.Sprintf("Your message was `%d` characters long, but the maximum message length is 800. Please send a shorter message.", len(*message)), nil
-    }
-
-    bodyMap := map[string]string{
-        "messageText": *message,
-    }
-
-    bodyJson, err := json.Marshal(bodyMap)
-    log.Printf("Sending message to Nomi %v: %v", nomi.CompanionId, string(bodyJson))
-
-    messageSendUrl := NomiUrlComponents["SendMessage"][0] + "/" + nomi.CompanionId + "/" + NomiUrlComponents["SendMessage"][1]
-    response, err := nomi.ApiCall(messageSendUrl, "Post", bodyMap)
+// 🔥 Fetch recent messages (probe API)
+func (nomi *NomiKin) FetchRecentMessages(roomId string) ([]NomiMessage, error) {
+    url := fmt.Sprintf("https://api.nomi.ai/v1/rooms/%s/messages", roomId)
+    response, err := nomi.ApiCall(url, "GET", nil)
     if err != nil {
-        log.Printf("Error from API call: %v", err.Error())
-        return "", err
+        log.Printf("Error fetching recent messages: %v", err)
+        return nil, err
     }
 
-    // 👇 LOG RAW API RESPONSE FOR SENDNOMIMESSAGE
-    log.Printf("🔎 RAW SendNomiMessage API response: %s", string(response))
+    log.Printf("🔎 RAW FetchRecentMessages response: %s", string(response))
 
-    var result map[string]interface{}
-    if err := json.Unmarshal([]byte(response), &result); err != nil {
-        return "", err
-    } else {
-        if replyMessage, ok := result["replyMessage"].(map[string]interface{}); ok {
-            log.Printf("Received reply message from Nomi %v: %v", nomi.CompanionId, replyMessage)
-            if textValue, ok := replyMessage["text"].(string); ok {
-                return textValue, nil
-            }
-        }
+    var messagesResp RecentMessagesResponse
+    if err := json.Unmarshal(response, &messagesResp); err != nil {
+        log.Printf("Error parsing FetchRecentMessages response: %v", err)
+        return nil, err
     }
-
-    return "", fmt.Errorf("Failed to return anything meaningful")
+    return messagesResp.Messages, nil
 }
 
-func (nomi *NomiKin) RequestNomiRoomReply(roomId *string, nomiId *string) (string, error) {
-    bodyMap := map[string]string{
-        "nomiUuid": *nomiId,
-    }
-
-    messageSendUrl := NomiUrlComponents["RoomReply"][0] + "/" + *roomId + "/" + NomiUrlComponents["RoomReply"][1]
-    response, err := nomi.ApiCall(messageSendUrl, "Post", bodyMap)
-    if err != nil {
-        log.Printf("Error from API call: %v", err.Error())
-        return "", err
-    }
-
-    // 👇 LOG RAW API RESPONSE FOR REQUESTNOMIROOMREPLY
-    log.Printf("🔎 RAW RequestNomiRoomReply API response: %s", string(response))
-
-    var result NomiReplyMessageContainer
-    if err := json.Unmarshal(response, &result); err != nil {
-        log.Printf("Error parsing Nomi response: %v", err)
-        return "", err
-    }
-
-    log.Printf("Received Message from Nomi %v to room %s: %v", nomi.CompanionId, *roomId, result.ReplyMessage.Text)
-
-    if result.ReplyMessage.ImageUrl != "" {
-        log.Printf("Received Image from Nomi %v: %v", nomi.CompanionId, result.ReplyMessage.ImageUrl)
-        return fmt.Sprintf("%s||%s", result.ReplyMessage.Text, result.ReplyMessage.ImageUrl), nil
-    }
-
-    return result.ReplyMessage.Text, nil
+// 🔥 Start polling loop for new messages
+func (nomi *NomiKin) StartPollingForNewMessages(roomId string, discordChannelID string, discordSession *discordgo.Session) {
+    go func() {
+        for {
+            messages, err := nomi.FetchRecentMessages(roomId)
+            if err == nil && len(messages) > 0 {
+                latest := messages[len(messages)-1]
+                if latest.Id != nomi.LastMessageID {
+                    nomi.LastMessageID = latest.Id
+                    log.Printf("📸 New message detected: %v", latest.Text)
+                    
+                    discordSession.ChannelMessageSend(discordChannelID, latest.Text)
+                    if latest.ImageUrl != "" {
+                        SendImageToDiscord(discordSession, discordChannelID, latest.ImageUrl)
+                    }
+                }
+            }
+            time.Sleep(10 * time.Second)
+        }
+    }()
 }
