@@ -1,4 +1,4 @@
-// Nomi.go (Patched for RAW JSON Logging)
+// Nomi.go (Patched for RAW JSON Logging in Both API Calls)
 package NomiKin
 
 import (
@@ -94,6 +94,44 @@ func (nomi *NomiKin) ApiCall(endpoint string, method string, body interface{}) (
     return responseBody, nil
 }
 
+func (nomi *NomiKin) SendNomiMessage(message *string) (string, error) {
+    if len(*message) > 800 {
+        log.Printf("Message too long: %d", len(*message))
+        return fmt.Sprintf("Your message was `%d` characters long, but the maximum message length is 800. Please send a shorter message.", len(*message)), nil
+    }
+
+    bodyMap := map[string]string{
+        "messageText": *message,
+    }
+
+    bodyJson, err := json.Marshal(bodyMap)
+    log.Printf("Sending message to Nomi %v: %v", nomi.CompanionId, string(bodyJson))
+
+    messageSendUrl := NomiUrlComponents["SendMessage"][0] + "/" + nomi.CompanionId + "/" + NomiUrlComponents["SendMessage"][1]
+    response, err := nomi.ApiCall(messageSendUrl, "Post", bodyMap)
+    if err != nil {
+        log.Printf("Error from API call: %v", err.Error())
+        return "", err
+    }
+
+    // 👇 LOG RAW API RESPONSE FOR SENDNOMIMESSAGE
+    log.Printf("🔎 RAW SendNomiMessage API response: %s", string(response))
+
+    var result map[string]interface{}
+    if err := json.Unmarshal([]byte(response), &result); err != nil {
+        return "", err
+    } else {
+        if replyMessage, ok := result["replyMessage"].(map[string]interface{}); ok {
+            log.Printf("Received reply message from Nomi %v: %v", nomi.CompanionId, replyMessage)
+            if textValue, ok := replyMessage["text"].(string); ok {
+                return textValue, nil
+            }
+        }
+    }
+
+    return "", fmt.Errorf("Failed to return anything meaningful")
+}
+
 func (nomi *NomiKin) RequestNomiRoomReply(roomId *string, nomiId *string) (string, error) {
     bodyMap := map[string]string{
         "nomiUuid": *nomiId,
@@ -106,8 +144,8 @@ func (nomi *NomiKin) RequestNomiRoomReply(roomId *string, nomiId *string) (strin
         return "", err
     }
 
-    // 👇 LOG RAW API RESPONSE
-    log.Printf("🔎 RAW Nomi API response: %s", string(response))
+    // 👇 LOG RAW API RESPONSE FOR REQUESTNOMIROOMREPLY
+    log.Printf("🔎 RAW RequestNomiRoomReply API response: %s", string(response))
 
     var result NomiReplyMessageContainer
     if err := json.Unmarshal(response, &result); err != nil {
