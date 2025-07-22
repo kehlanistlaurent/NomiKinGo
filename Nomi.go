@@ -1,4 +1,4 @@
-// Nomi.go (Surgical Patch: FetchRecentMessages + Polling)
+// Nomi.go (Patched: FetchRecentMessages + Polling + Auto Trigger)
 package NomiKin
 
 import (
@@ -10,12 +10,15 @@ import (
     "net/http"
     "strings"
     "time"
+
+    "github.com/bwmarrin/discordgo"
 )
 
 type Nomi struct {
-    ApiKey      string
-    CompanionId string
-    LastMessageID string // track last message ID
+    ApiKey         string
+    CompanionId    string
+    LastMessageID  string // track last message ID
+    PollingStarted bool   // track polling state
 }
 
 type Room struct {
@@ -29,9 +32,9 @@ type RoomContainer struct {
 }
 
 type NomiMessage struct {
-    Text     string `json:"text"`
-    ImageUrl string `json:"imageUrl"`
-    Id       string `json:"id"`
+    Text      string `json:"text"`
+    ImageUrl  string `json:"imageUrl"`
+    Id        string `json:"id"`
     Timestamp string `json:"timestamp"`
 }
 
@@ -39,7 +42,6 @@ type RecentMessagesResponse struct {
     Messages []NomiMessage `json:"messages"`
 }
 
-// Existing ApiCall unchanged
 func (nomi *NomiKin) ApiCall(endpoint string, method string, body interface{}) ([]byte, error) {
     method = strings.ToUpper(method)
     headers := map[string]string{
@@ -86,7 +88,6 @@ func (nomi *NomiKin) ApiCall(endpoint string, method string, body interface{}) (
     return responseBody, nil
 }
 
-// 🔥 Fetch recent messages (probe API)
 func (nomi *NomiKin) FetchRecentMessages(roomId string) ([]NomiMessage, error) {
     url := fmt.Sprintf("https://api.nomi.ai/v1/rooms/%s/messages", roomId)
     response, err := nomi.ApiCall(url, "GET", nil)
@@ -105,8 +106,14 @@ func (nomi *NomiKin) FetchRecentMessages(roomId string) ([]NomiMessage, error) {
     return messagesResp.Messages, nil
 }
 
-// 🔥 Start polling loop for new messages
 func (nomi *NomiKin) StartPollingForNewMessages(roomId string, discordChannelID string, discordSession *discordgo.Session) {
+    if nomi.PollingStarted {
+        log.Printf("Polling already active for room: %s", roomId)
+        return
+    }
+    nomi.PollingStarted = true
+    log.Printf("🔁 Starting polling for room: %s", roomId)
+
     go func() {
         for {
             messages, err := nomi.FetchRecentMessages(roomId)
@@ -115,7 +122,7 @@ func (nomi *NomiKin) StartPollingForNewMessages(roomId string, discordChannelID 
                 if latest.Id != nomi.LastMessageID {
                     nomi.LastMessageID = latest.Id
                     log.Printf("📸 New message detected: %v", latest.Text)
-                    
+
                     discordSession.ChannelMessageSend(discordChannelID, latest.Text)
                     if latest.ImageUrl != "" {
                         SendImageToDiscord(discordSession, discordChannelID, latest.ImageUrl)
@@ -125,4 +132,11 @@ func (nomi *NomiKin) StartPollingForNewMessages(roomId string, discordChannelID 
             time.Sleep(10 * time.Second)
         }
     }()
+}
+
+// Automatically trigger polling after initial room reply
+func (nomi *NomiKin) AutoStartPollingAfterReply(roomId string, discordChannelID string, discordSession *discordgo.Session) {
+    if !nomi.PollingStarted {
+        nomi.StartPollingForNewMessages(roomId, discordChannelID, discordSession)
+    }
 }
