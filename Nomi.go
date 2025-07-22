@@ -1,4 +1,4 @@
-// Nomi.go (Patched: FetchRecentMessages + Polling + Auto Trigger)
+// Nomi.go (Fully Patched: Includes StartPollingForNewMessages)
 package NomiKin
 
 import (
@@ -134,9 +134,13 @@ func (nomi *NomiKin) StartPollingForNewMessages(roomId string, discordChannelID 
     }()
 }
 
-// Automatically trigger polling after initial room reply
-func (nomi *NomiKin) AutoStartPollingAfterReply(roomId string, discordChannelID string, discordSession *discordgo.Session) {
-    if !nomi.PollingStarted {
-        nomi.StartPollingForNewMessages(roomId, discordChannelID, discordSession)
+func SendImageToDiscord(s *discordgo.Session, channelID, imageUrl string) error {
+    resp, err := http.Get(imageUrl)
+    if err != nil {
+        return err
     }
+    defer resp.Body.Close()
+
+    _, err = s.ChannelFileSend(channelID, "image.webp", resp.Body)
+    return err
 }
