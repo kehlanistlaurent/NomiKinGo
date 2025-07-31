@@ -4,7 +4,7 @@ import (
     "log"
 )
 
-var Version = "v0.3.0"
+var Version = "v0.5"
 
 type NomiKin struct {
     ApiKey      string
